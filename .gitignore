@@ -1,0 +1,6 @@
+.idea
+.vscode
+*.gguf
+*.bin
+venv
+__pycache__
