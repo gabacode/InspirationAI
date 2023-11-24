@@ -4,7 +4,7 @@ from datetime import datetime
 
 import torch
 from PIL import Image, ImageDraw, ImageChops, ImageEnhance
-from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
+from diffusers import StableDiffusionPipeline
 
 
 class ImageGenerator:
@@ -66,14 +66,6 @@ class ImageGenerator:
         else:
             print("Using CPU")
             pipe.enable_sequential_cpu_offload()
-
-        use_lora = True
-        if use_lora:
-            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
-            pipe.load_lora_weights("latent-consistency/lcm-lora-sdxl", adapter_name="lcm")
-            pipe.load_lora_weights("TheLastBen/Papercut_SDXL", weight_name="papercut.safetensors",
-                                   adapter_name="papercut")
-            pipe.set_adapters(["lcm", "papercut"], adapter_weights=[1.0, 0.8])
 
         image = pipe(**args).images[0]
 
