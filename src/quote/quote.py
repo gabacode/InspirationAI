@@ -1,3 +1,5 @@
+import gc
+
 from PIL import ImageFont
 from langchain.chains import LLMChain
 
@@ -11,9 +13,14 @@ class QuoteGenerator:
         self.llm = load_llm()
         self.width, self.height = size
         self.quote = self.generate_quote(topic)
+        self.unload()
 
-        self.image = ImageGenerator(topic, size)
+        self.image = ImageGenerator(self.quote, size)
         self.footer = Footer(self.height)
+
+    def unload(self):
+        del self.llm
+        gc.collect()
 
     def generate_quote(self, topic: str) -> str:
         """

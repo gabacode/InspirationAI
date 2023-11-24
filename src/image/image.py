@@ -1,22 +1,64 @@
+import gc
 import textwrap
+from datetime import datetime
 
+import torch
 from PIL import Image, ImageDraw, ImageChops, ImageEnhance
+from diffusers import DiffusionPipeline
 
 
 class ImageGenerator:
-    def __init__(self, topic: str, size: tuple):
-        self.topic = topic
+    def __init__(self, quote: str, size: tuple):
+        self.quote = quote
+        self.size = size
         self.width, self.height = size
 
     def prepare(self):
         """
         Prepares the background image
         """
-        bg_image = "images/bg0.jpg"
+        bg_image = self.generate_image()
         image = Image.open(bg_image).resize((self.width, self.height))
         image = self.apply_tint(image, (200, 200, 200))
         ImageDraw.Draw(image)
         return image
+
+    def generate_image(self) -> str:
+        """
+        Runs inference to generate an image
+        """
+        args = {
+            "prompt": self.quote,
+            "width": (self.width // 8) * 8,
+            "height": (self.height // 8) * 8,
+            "negative_prompt": ["text", "bad anatomy", "bad hands"],
+            "num_inference_steps": 4,
+            "guidance_scale": 1,
+        }
+
+        pipe = DiffusionPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+        )
+        pipe.enable_sequential_cpu_offload()
+
+        pipe.load_lora_weights("latent-consistency/lcm-lora-sdxl", adapter_name="lcm")
+        pipe.load_lora_weights("TheLastBen/Papercut_SDXL", weight_name="papercut.safetensors", adapter_name="papercut")
+        pipe.set_adapters(["lcm", "papercut"], adapter_weights=[1.0, 0.8])
+
+        image = pipe(**args).images[0]
+
+        del pipe
+        gc.collect()
+
+        return self.save_image(image)
+
+    @staticmethod
+    def save_image(image):
+        image_path = "images/" + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + ".jpg"
+        image.save(image_path)
+        return image_path
 
     @staticmethod
     def apply_tint(image, tint_color):
