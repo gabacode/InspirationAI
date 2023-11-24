@@ -4,12 +4,12 @@ from datetime import datetime
 
 import torch
 from PIL import Image, ImageDraw, ImageChops, ImageEnhance
-from diffusers import DiffusionPipeline
+from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
 
 
 class ImageGenerator:
-    def __init__(self, quote: str, size: tuple):
-        self.quote = quote
+    def __init__(self, prompt: str, size: tuple):
+        self.prompt = prompt.strip()
         self.size = size
         self.width, self.height = size
 
@@ -18,38 +18,67 @@ class ImageGenerator:
         Prepares the background image
         """
         bg_image = self.generate_image()
-        image = Image.open(bg_image).resize((self.width, self.height))
+        image = Image.open(bg_image)
+        image = self.resize_and_crop(image, self.width, self.height)
         image = self.apply_tint(image, (200, 200, 200))
         ImageDraw.Draw(image)
         return image
+
+    @staticmethod
+    def resize_and_crop(image, target_width, target_height):
+        """
+        Resize and crop the image to fit the specified size.
+        """
+        original_width, original_height = image.size
+        ratio = max(target_width / original_width, target_height / original_height)
+        new_size = (int(original_width * ratio), int(original_height * ratio))
+        image = image.resize(new_size, Image.ANTIALIAS)
+        crop_x0 = (new_size[0] - target_width) // 2 if new_size[0] > target_width else 0
+        crop_y0 = (new_size[1] - target_height) // 2 if new_size[1] > target_height else 0
+        crop_x1 = crop_x0 + target_width if new_size[0] > target_width else new_size[0]
+        crop_y1 = crop_y0 + target_height if new_size[1] > target_height else new_size[1]
+        return image.crop((crop_x0, crop_y0, crop_x1, crop_y1))
 
     def generate_image(self) -> str:
         """
         Runs inference to generate an image
         """
         args = {
-            "prompt": self.quote,
-            "width": (self.width // 8) * 8,
-            "height": (self.height // 8) * 8,
-            "negative_prompt": ["text", "bad anatomy", "bad hands"],
-            "num_inference_steps": 4,
+            "prompt": self.prompt,
+            "width": 512,
+            "height": 512,
+            "negative_prompt": ["text", "bad anatomy", "bad hands", "unrealistic", "bad pose", "bad lighting"],
+            "num_inference_steps": 100,
             "guidance_scale": 1,
         }
 
-        pipe = DiffusionPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-xl-base-1.0",
+        pipe = StableDiffusionPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5",
             torch_dtype=torch.float16,
             use_safetensors=True,
         )
-        pipe.enable_sequential_cpu_offload()
 
-        pipe.load_lora_weights("latent-consistency/lcm-lora-sdxl", adapter_name="lcm")
-        pipe.load_lora_weights("TheLastBen/Papercut_SDXL", weight_name="papercut.safetensors", adapter_name="papercut")
-        pipe.set_adapters(["lcm", "papercut"], adapter_weights=[1.0, 0.8])
+        if torch.cuda.is_available():
+            print("Using CUDA")
+            pipe = pipe.to("cuda")
+            pipe.enable_vae_slicing()
+            pipe.enable_xformers_memory_efficient_attention()
+        else:
+            print("Using CPU")
+            pipe.enable_sequential_cpu_offload()
+
+        use_lora = True
+        if use_lora:
+            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
+            pipe.load_lora_weights("latent-consistency/lcm-lora-sdxl", adapter_name="lcm")
+            pipe.load_lora_weights("TheLastBen/Papercut_SDXL", weight_name="papercut.safetensors",
+                                   adapter_name="papercut")
+            pipe.set_adapters(["lcm", "papercut"], adapter_weights=[1.0, 0.8])
 
         image = pipe(**args).images[0]
 
         del pipe
+        torch.cuda.empty_cache()
         gc.collect()
 
         return self.save_image(image)
