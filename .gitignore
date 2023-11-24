@@ -3,5 +3,6 @@
 *.gguf
 *.bin
 *.ckpt
+*.jpg
 venv
 __pycache__
